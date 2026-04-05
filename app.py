@@ -96,53 +96,55 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 3. CARGA Y PROCESAMIENTO (100% CACHEADO PARA LA NUBE)
+# 3. CARGA Y PROCESAMIENTO (CORREGIDO PARA LA NUBE)
 # ==========================================
 st.sidebar.header("1. Carga de Datos")
 
 NOMBRE_CSV = "dataset_2024_2025_unificado_5_5MIN.csv"
 
-# 👇 Envolvemos TODO (Lectura + IA) en el Caché para que corra solo 1 vez
+# 👇 1. CACHÉ PURO: Solo lee el archivo y hace cálculos simples. ¡Cero IA aquí adentro!
 @st.cache_data
-def cargar_y_procesar_datos(nombre_archivo):
+def cargar_datos_base(nombre_archivo):
     df_temp = pd.read_csv(nombre_archivo)
-    
-    if 'timestampseconds' not in df_temp.columns:
-        return None
-        
-    df_temp['Fecha_Hora'] = pd.to_datetime(df_temp['timestampseconds'])
-    df_temp.set_index('Fecha_Hora', inplace=True)
-    
-    # Procesamos la IA directamente aquí adentro
-    if 'Ratio_Esfuerzo' not in df_temp.columns:
+    if 'timestampseconds' in df_temp.columns:
+        df_temp['Fecha_Hora'] = pd.to_datetime(df_temp['timestampseconds'])
+        df_temp.set_index('Fecha_Hora', inplace=True)
+        # Feature Engineering básico
         df_temp['Ratio_Esfuerzo'] = df_temp['Corriente_Salida_A'] / (df_temp['Frecuencia_Hz'] + 0.001)
-        
-    df_temp['Estado'] = np.where(df_temp['Corriente_Salida_A'] < 0.5, 'Apagada', 'Operando')
-    
-    try:
-        df_modelo = df_temp[variables_requeridas].copy()
-        datos_escalados = scaler.transform(df_modelo)
-        df_temp['Prediccion_Cruda'] = modelo_if.predict(datos_escalados)
-        
-        umbral_corriente = 80
-        df_temp['Alarma_Modelo'] = df_temp['Prediccion_Cruda']
-        df_temp.loc[(df_temp['Prediccion_Cruda'] == -1) & (df_temp['Corriente_Salida_A'] < umbral_corriente), 'Alarma_Modelo'] = 1
-    except Exception:
-        pass
-        
-    return df_temp
+        df_temp['Estado'] = np.where(df_temp['Corriente_Salida_A'] < 0.5, 'Apagada', 'Operando')
+        return df_temp
+    return None
 
-# Ejecutamos la función
+# 👇 2. LLAMADA AL CACHÉ: Usamos .copy() para proteger la memoria del servidor
 try:
-    with st.spinner("Inicializando motor predictivo (esto tomará unos segundos solo la primera vez)..."):
-        df = cargar_y_procesar_datos(NOMBRE_CSV)
-        if df is None:
+    with st.spinner("Cargando historial de SCADA..."):
+        df_cache = cargar_datos_base(NOMBRE_CSV)
+        if df_cache is None:
             st.error("❌ El archivo no tiene la columna 'timestampseconds'.")
             st.stop()
-    st.sidebar.success("📊 Historial de SCADA procesado")
+        # Copiamos los datos para poder manipularlos sin romper el caché
+        df = df_cache.copy() 
 except FileNotFoundError:
-    st.error(f"❌ Error: No se encontró el archivo '{NOMBRE_CSV}'. Verifica tu repositorio.")
+    st.error(f"❌ Error: No se encontró el archivo '{NOMBRE_CSV}'. Verifica GitHub.")
     st.stop()
+
+# 👇 3. INTELIGENCIA ARTIFICIAL: Se ejecuta afuera del caché (Súper rápido y no se congela)
+with st.spinner("Ejecutando Inteligencia Artificial..."):
+    try:
+        df_modelo = df[variables_requeridas]
+        datos_escalados = scaler.transform(df_modelo)
+        df['Prediccion_Cruda'] = modelo_if.predict(datos_escalados)
+        
+        # Regla de Negocio
+        umbral_corriente = 80
+        df['Alarma_Modelo'] = df['Prediccion_Cruda']
+        df.loc[(df['Prediccion_Cruda'] == -1) & (df['Corriente_Salida_A'] < umbral_corriente), 'Alarma_Modelo'] = 1
+        
+    except Exception as e:
+        st.error(f"❌ Error al procesar la IA: {e}")
+        st.stop()
+
+st.sidebar.success("📊 Sistema procesado correctamente")
 
 # ==========================================
 # 4. FILTROS DE FECHA Y HORA INTERACTIVOS
