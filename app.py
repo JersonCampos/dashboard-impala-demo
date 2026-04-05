@@ -212,22 +212,6 @@ try:
 except ImportError:
     st.sidebar.error("Falta instalar 'openpyxl' para el Excel.")
 
-# --- BOTÓN 3: EXPORTAR A PDF (Impresión del Navegador) ---
-# Usamos un poco de HTML/JS para invocar la función nativa de impresión
-boton_pdf_js = """
-<script>
-function imprimirPDF() {
-    window.print();
-}
-</script>
-<button onclick="imprimirPDF()" style="width: 100%; padding: 8px; background-color: #0F172A; color: #E2E8F0; border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; cursor: pointer; font-family: sans-serif; font-size: 14px; margin-top: 5px;">
-    🖨️ Generar PDF del Dashboard
-</button>
-<p style="font-size: 10px; color: gray; text-align: center; margin-top: 5px;">(Selecciona "Guardar como PDF" en el destino)</p>
-"""
-import streamlit.components.v1 as components
-with st.sidebar:
-    components.html(boton_pdf_js, height=80)
 
 # ==========================================
 # 5. CÁLCULOS DE MÉTRICAS (EXCLUYENDO APAGADAS)
