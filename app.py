@@ -151,13 +151,10 @@ st.sidebar.success("📊 Sistema procesado correctamente")
 # ==========================================
 st.sidebar.header("2. Filtros de Análisis")
 
-# 4.1 Selección de Fecha de Inicio y Fin (Por defecto: Últimos 7 días)
-import datetime
-ultima_fecha = df.index.max().date()
-fecha_inicio_default = ultima_fecha - datetime.timedelta(days=7) 
+# 4.1 Selección de Fecha de Inicio y Fin
+fecha_inicio = st.sidebar.date_input("Fecha Inicio", df.index.min().date())
+fecha_fin = st.sidebar.date_input("Fecha Fin", df.index.max().date())
 
-fecha_inicio = st.sidebar.date_input("Fecha Inicio", fecha_inicio_default)
-fecha_fin = st.sidebar.date_input("Fecha Fin", ultima_fecha)
 # 4.2 Selección de Hora y Minuto (Usamos slider para que sea intuitivo)
 st.sidebar.markdown("---")
 st.sidebar.write("Rango Horario:")
