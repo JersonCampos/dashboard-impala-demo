@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 # ==========================================
 # 1. CONFIGURACIÓN DE LA PÁGINA Y CABECERA
 # ==========================================
-st.set_page_config(page_title="Mantenimiento Predictivo - IMPALA", layout="wide")
+st.set_page_config(page_title="Mantenimiento Predictivo - IMPALA", page_icon="⚙️", layout="wide")
 
 import streamlit.components.v1 as components
 
