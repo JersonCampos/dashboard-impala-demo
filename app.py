@@ -430,58 +430,105 @@ fig3.update_layout(
 st.plotly_chart(fig3, width="stretch", key="grafica_frecuencia")
 
 # ==========================================
-# 10. REGISTRO DE EVENTOS (OPTIMIZADO PARA NUBE)
+# 10. REGISTRO DE EVENTOS Y ALERTAS (LOG MULTIFILTRO)
 # ==========================================
 st.markdown("---")
 st.subheader("📋 Registro de Alertas y Eventos")
 
-filtro_log = st.radio("Filtro:", ["Todas", "Normal", "Precaución", "Críticas", "IA"], horizontal=True, label_visibility="collapsed")
+# 10.1 Botones de Filtro (Agregamos Normal y Precaución)
+filtro_log = st.radio(
+    "Filtro:",
+    ["Todas", "Normal", "Precaución", "Críticas", "IA"],
+    horizontal=True,
+    label_visibility="collapsed"
+)
 
+# 10.2 Generador Inteligente de Eventos
 eventos = []
-df_operando_log = df_filtrado[df_filtrado['Estado'] == 'Operando'].copy()
 
-# 1. ORDENAMOS y FILTRAMOS *ANTES* de iterar (Esto salva la memoria RAM)
-df_operando_log = df_operando_log.sort_index(ascending=False)
+# Filtramos solo cuando la faja está "Operando" para no llenar el log de ceros
+df_operando_log = df_filtrado[df_filtrado['Estado'] == 'Operando']
 
-if filtro_log == "Normal":
-    df_mostrar = df_operando_log[df_operando_log['Corriente_Salida_A'] < 180]
-elif filtro_log == "Precaución":
-    df_mostrar = df_operando_log[(df_operando_log['Corriente_Salida_A'] >= 180) & (df_operando_log['Corriente_Salida_A'] < 200)]
-elif filtro_log == "Críticas":
-    df_mostrar = df_operando_log[df_operando_log['Corriente_Salida_A'] >= 200]
-elif filtro_log == "IA":
-    df_mostrar = df_operando_log[df_operando_log['Alarma_Modelo'] == -1]
-else:
-    df_mostrar = df_operando_log
-
-# 2. FRENO DE SEGURIDAD: Solo tomamos las 50 alertas más recientes
-LIMITE_EVENTOS = 50
-df_mostrar = df_mostrar.head(LIMITE_EVENTOS)
-
-# 3. Iteramos solo esas 50 filas (tarda 0.01 segundos en vez de colapsar la app)
-for tiempo, fila in df_mostrar.iterrows():
+for tiempo, fila in df_operando_log.iterrows():
     corriente = fila['Corriente_Salida_A']
     
+    # A. EVENTOS DE IA (Modelo Predictivo)
     if fila['Alarma_Modelo'] == -1:
-        eventos.append({'tiempo': tiempo, 'tipo': 'IA', 'icono': '🧠', 'color': '#A855F7', 'titulo': 'Alerta Predictiva (IA)', 'desc': f"Anomalía detectada. Ratio: {fila['Ratio_Esfuerzo']:.2f}", 'sub': 'IA · MODELO PREDICTIVO'})
+        eventos.append({
+            'tiempo': tiempo,
+            'tipo': 'IA',
+            'icono': '🧠',
+            'color': '#A855F7', # Morado
+            'titulo': 'Alerta Predictiva (IA)',
+            'desc': f"Anomalía detectada. Ratio de esfuerzo elevado: {fila['Ratio_Esfuerzo']:.2f}",
+            'sub': 'IA · MODELO PREDICTIVO'
+        })
     
+    # B. EVENTOS FÍSICOS (Estados de Corriente)
     if corriente >= 200:
-        eventos.append({'tiempo': tiempo, 'tipo': 'CRITICAS', 'icono': '🔴', 'color': '#EF4444', 'titulo': 'Sobreesfuerzo Crítico', 'desc': f"Corriente a {corriente:.1f}A", 'sub': 'FÍSICO · CRÍTICO'})
+        eventos.append({
+            'tiempo': tiempo,
+            'tipo': 'CRITICAS',
+            'icono': '🔴',
+            'color': '#EF4444', # Rojo
+            'titulo': 'Sobreesfuerzo Crítico',
+            'desc': f"Corriente de {corriente:.1f}A supera umbral crítico (>200A)",
+            'sub': 'FÍSICO · CRÍTICO'
+        })
     elif corriente >= 180:
-        eventos.append({'tiempo': tiempo, 'tipo': 'PRECAUCION', 'icono': '🟡', 'color': '#FBBF24', 'titulo': 'Alta Carga Detectada', 'desc': f"Corriente a {corriente:.1f}A", 'sub': 'FÍSICO · PRECAUCIÓN'})
+        eventos.append({
+            'tiempo': tiempo,
+            'tipo': 'PRECAUCION',
+            'icono': '🟡',
+            'color': '#FBBF24', # Amarillo
+            'titulo': 'Alta Carga Detectada',
+            'desc': f"Corriente de {corriente:.1f}A en zona de precaución (>180A)",
+            'sub': 'FÍSICO · PRECAUCIÓN'
+        })
     else:
-        eventos.append({'tiempo': tiempo, 'tipo': 'NORMAL', 'icono': '🟢', 'color': '#10B981', 'titulo': 'Operación Nominal', 'desc': f"Corriente estable a {corriente:.1f}A", 'sub': 'FÍSICO · ESTABLE'})
+        eventos.append({
+            'tiempo': tiempo,
+            'tipo': 'NORMAL',
+            'icono': '🟢',
+            'color': '#10B981', # Verde
+            'titulo': 'Operación Nominal',
+            'desc': f"Corriente estable y segura a {corriente:.1f}A",
+            'sub': 'FÍSICO · ESTABLE'
+        })
 
+# Ordenamos la lista para que el evento más reciente salga arriba
+eventos = sorted(eventos, key=lambda x: x['tiempo'], reverse=True)
+
+# 10.3 Aplicar el Filtro Seleccionado
+if filtro_log == "Normal":
+    eventos_mostrar = [e for e in eventos if e['tipo'] == 'NORMAL']
+elif filtro_log == "Precaución":
+    eventos_mostrar = [e for e in eventos if e['tipo'] == 'PRECAUCION']
+elif filtro_log == "Críticas":
+    eventos_mostrar = [e for e in eventos if e['tipo'] == 'CRITICAS']
+elif filtro_log == "IA":
+    eventos_mostrar = [e for e in eventos if e['tipo'] == 'IA']
+else:
+    eventos_mostrar = eventos # Opción "Todas"
+
+# 👉 EL FRENO DE SEGURIDAD: Mostramos solo los 100 eventos más recientes
+LIMITE_EVENTOS = 50
+eventos_mostrar = eventos_mostrar[:LIMITE_EVENTOS]
+
+# 10.4 Renderizado del Log con Scroll Automático
 with st.container(height=400):
-    if len(eventos) == 0:
+    if len(eventos_mostrar) == 0:
         st.success(f"✅ Sistema estable. No hay alertas para la categoría '{filtro_log}'.")
     else:
-        if len(df_operando_log) > LIMITE_EVENTOS and filtro_log == "Todas":
-             st.caption(f"Mostrando los {LIMITE_EVENTOS} eventos más recientes por rendimiento.")
+        # Avisamos al operador si hay más eventos ocultos
+        if len(eventos) > LIMITE_EVENTOS and filtro_log == "Todas":
+             st.caption(f"Mostrando los últimos {LIMITE_EVENTOS} eventos")
              
-        for ev in eventos:
+        for ev in eventos_mostrar:
             hora_str = ev['tiempo'].strftime("%H:%M") 
             fecha_str = ev['tiempo'].strftime("%Y-%m-%d")
             
+           # Tarjeta HTML adaptada AUTOMÁTICAMENTE al tema (Claro/Oscuro/Sistema)
             tarjeta_html = f"""<div style="background-color: var(--secondary-background-color); border-left: 4px solid {ev['color']}; padding: 12px; margin-bottom: 8px; border-radius: 4px; display: flex; justify-content: space-between; font-family: monospace; border-top: 1px solid rgba(128,128,128,0.2); border-right: 1px solid rgba(128,128,128,0.2); border-bottom: 1px solid rgba(128,128,128,0.2);"><div style="display: flex; flex-direction: column;"><div style="display: flex; align-items: center; margin-bottom: 4px;"><span style="font-size: 16px;">{ev['icono']}</span><span style="color: var(--text-color); font-weight: bold; margin-left: 8px; font-size: 14px;">{ev['titulo']}</span></div><div style="color: var(--text-color); opacity: 0.8; font-size: 13px; margin-left: 28px; margin-bottom: 6px;">{ev['desc']}</div><div style="color: {ev['color']}; font-size: 11px; font-weight: bold; margin-left: 28px;">{ev['sub']}</div></div><div style="color: var(--text-color); opacity: 0.6; font-size: 12px; text-align: right;">{fecha_str}<br>{hora_str}</div></div>"""
+            
             st.markdown(tarjeta_html, unsafe_allow_html=True)
