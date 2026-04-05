@@ -96,67 +96,66 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 3. CARGA DE DATOS (AUTOMÁTICA Y OPTIMIZADA - VERSIÓN DEMO)
+# 3. CARGA Y PROCESAMIENTO (100% CACHEADO PARA LA NUBE)
 # ==========================================
 st.sidebar.header("1. Carga de Datos")
 
 NOMBRE_CSV = "dataset_2024_2025_unificado_5_5MIN.csv"
 
-# 👇 Envolvemos la lectura pesada en una función con Caché
+# 👇 Envolvemos TODO (Lectura + IA) en el Caché para que corra solo 1 vez
 @st.cache_data
-def cargar_historico_demo(nombre_archivo):
-    # Leemos el archivo
+def cargar_y_procesar_datos(nombre_archivo):
     df_temp = pd.read_csv(nombre_archivo)
     
-    # Configuramos el índice de tiempo
-    if 'timestampseconds' in df_temp.columns:
-        df_temp['Fecha_Hora'] = pd.to_datetime(df_temp['timestampseconds'])
-        df_temp.set_index('Fecha_Hora', inplace=True)
-    else:
+    if 'timestampseconds' not in df_temp.columns:
         return None
+        
+    df_temp['Fecha_Hora'] = pd.to_datetime(df_temp['timestampseconds'])
+    df_temp.set_index('Fecha_Hora', inplace=True)
+    
+    # Procesamos la IA directamente aquí adentro
+    if 'Ratio_Esfuerzo' not in df_temp.columns:
+        df_temp['Ratio_Esfuerzo'] = df_temp['Corriente_Salida_A'] / (df_temp['Frecuencia_Hz'] + 0.001)
+        
+    df_temp['Estado'] = np.where(df_temp['Corriente_Salida_A'] < 0.5, 'Apagada', 'Operando')
+    
+    try:
+        df_modelo = df_temp[variables_requeridas].copy()
+        datos_escalados = scaler.transform(df_modelo)
+        df_temp['Prediccion_Cruda'] = modelo_if.predict(datos_escalados)
+        
+        umbral_corriente = 80
+        df_temp['Alarma_Modelo'] = df_temp['Prediccion_Cruda']
+        df_temp.loc[(df_temp['Prediccion_Cruda'] == -1) & (df_temp['Corriente_Salida_A'] < umbral_corriente), 'Alarma_Modelo'] = 1
+    except Exception:
+        pass
+        
     return df_temp
 
-# Ejecutamos la función (solo tardará la primera vez)
+# Ejecutamos la función
 try:
-    with st.spinner("Cargando base de datos histórica..."):
-        df = cargar_historico_demo(NOMBRE_CSV)
+    with st.spinner("Inicializando motor predictivo (esto tomará unos segundos solo la primera vez)..."):
+        df = cargar_y_procesar_datos(NOMBRE_CSV)
         if df is None:
             st.error("❌ El archivo no tiene la columna 'timestampseconds'.")
             st.stop()
-    st.sidebar.success("📊 Historial de SCADA cargado")
+    st.sidebar.success("📊 Historial de SCADA procesado")
 except FileNotFoundError:
-    st.error(f"❌ Error: No se encontró el archivo '{NOMBRE_CSV}'. Verifica que esté subido en tu GitHub.")
+    st.error(f"❌ Error: No se encontró el archivo '{NOMBRE_CSV}'. Verifica tu repositorio.")
     st.stop()
-
-# 👇 Procesamos la IA (Fuera del caché porque usa los modelos cargados en la Sección 2)
-with st.spinner("Ejecutando Inteligencia Artificial..."):
-    if 'Ratio_Esfuerzo' not in df.columns:
-        df['Ratio_Esfuerzo'] = df['Corriente_Salida_A'] / (df['Frecuencia_Hz'] + 0.001)
-        
-    df['Estado'] = np.where(df['Corriente_Salida_A'] < 0.5, 'Apagada', 'Operando')
-    
-    try:
-        df_modelo = df[variables_requeridas].copy()
-    except KeyError as e:
-        st.error(f"❌ Faltan columnas vitales. El modelo necesita: {variables_requeridas}")
-        st.stop()
-        
-    datos_escalados = scaler.transform(df_modelo)
-    df['Prediccion_Cruda'] = modelo_if.predict(datos_escalados)
-    
-    umbral_corriente = 80
-    df['Alarma_Modelo'] = df['Prediccion_Cruda']
-    df.loc[(df['Prediccion_Cruda'] == -1) & (df['Corriente_Salida_A'] < umbral_corriente), 'Alarma_Modelo'] = 1
 
 # ==========================================
 # 4. FILTROS DE FECHA Y HORA INTERACTIVOS
 # ==========================================
 st.sidebar.header("2. Filtros de Análisis")
 
-# 4.1 Selección de Fecha de Inicio y Fin
-fecha_inicio = st.sidebar.date_input("Fecha Inicio", df.index.min().date())
-fecha_fin = st.sidebar.date_input("Fecha Fin", df.index.max().date())
+# 4.1 Selección de Fecha de Inicio y Fin (Por defecto: Últimos 7 días)
+import datetime
+ultima_fecha = df.index.max().date()
+fecha_inicio_default = ultima_fecha - datetime.timedelta(days=7) 
 
+fecha_inicio = st.sidebar.date_input("Fecha Inicio", fecha_inicio_default)
+fecha_fin = st.sidebar.date_input("Fecha Fin", ultima_fecha)
 # 4.2 Selección de Hora y Minuto (Usamos slider para que sea intuitivo)
 st.sidebar.markdown("---")
 st.sidebar.write("Rango Horario:")
@@ -432,105 +431,58 @@ fig3.update_layout(
 st.plotly_chart(fig3, width="stretch", key="grafica_frecuencia")
 
 # ==========================================
-# 10. REGISTRO DE EVENTOS Y ALERTAS (LOG MULTIFILTRO)
+# 10. REGISTRO DE EVENTOS (OPTIMIZADO PARA NUBE)
 # ==========================================
 st.markdown("---")
 st.subheader("📋 Registro de Alertas y Eventos")
 
-# 10.1 Botones de Filtro (Agregamos Normal y Precaución)
-filtro_log = st.radio(
-    "Filtro:",
-    ["Todas", "Normal", "Precaución", "Críticas", "IA"],
-    horizontal=True,
-    label_visibility="collapsed"
-)
+filtro_log = st.radio("Filtro:", ["Todas", "Normal", "Precaución", "Críticas", "IA"], horizontal=True, label_visibility="collapsed")
 
-# 10.2 Generador Inteligente de Eventos
 eventos = []
+df_operando_log = df_filtrado[df_filtrado['Estado'] == 'Operando'].copy()
 
-# Filtramos solo cuando la faja está "Operando" para no llenar el log de ceros
-df_operando_log = df_filtrado[df_filtrado['Estado'] == 'Operando']
+# 1. ORDENAMOS y FILTRAMOS *ANTES* de iterar (Esto salva la memoria RAM)
+df_operando_log = df_operando_log.sort_index(ascending=False)
 
-for tiempo, fila in df_operando_log.iterrows():
+if filtro_log == "Normal":
+    df_mostrar = df_operando_log[df_operando_log['Corriente_Salida_A'] < 180]
+elif filtro_log == "Precaución":
+    df_mostrar = df_operando_log[(df_operando_log['Corriente_Salida_A'] >= 180) & (df_operando_log['Corriente_Salida_A'] < 200)]
+elif filtro_log == "Críticas":
+    df_mostrar = df_operando_log[df_operando_log['Corriente_Salida_A'] >= 200]
+elif filtro_log == "IA":
+    df_mostrar = df_operando_log[df_operando_log['Alarma_Modelo'] == -1]
+else:
+    df_mostrar = df_operando_log
+
+# 2. FRENO DE SEGURIDAD: Solo tomamos las 50 alertas más recientes
+LIMITE_EVENTOS = 50
+df_mostrar = df_mostrar.head(LIMITE_EVENTOS)
+
+# 3. Iteramos solo esas 50 filas (tarda 0.01 segundos en vez de colapsar la app)
+for tiempo, fila in df_mostrar.iterrows():
     corriente = fila['Corriente_Salida_A']
     
-    # A. EVENTOS DE IA (Modelo Predictivo)
     if fila['Alarma_Modelo'] == -1:
-        eventos.append({
-            'tiempo': tiempo,
-            'tipo': 'IA',
-            'icono': '🧠',
-            'color': '#A855F7', # Morado
-            'titulo': 'Alerta Predictiva (IA)',
-            'desc': f"Anomalía detectada. Ratio de esfuerzo elevado: {fila['Ratio_Esfuerzo']:.2f}",
-            'sub': 'IA · MODELO PREDICTIVO'
-        })
+        eventos.append({'tiempo': tiempo, 'tipo': 'IA', 'icono': '🧠', 'color': '#A855F7', 'titulo': 'Alerta Predictiva (IA)', 'desc': f"Anomalía detectada. Ratio: {fila['Ratio_Esfuerzo']:.2f}", 'sub': 'IA · MODELO PREDICTIVO'})
     
-    # B. EVENTOS FÍSICOS (Estados de Corriente)
     if corriente >= 200:
-        eventos.append({
-            'tiempo': tiempo,
-            'tipo': 'CRITICAS',
-            'icono': '🔴',
-            'color': '#EF4444', # Rojo
-            'titulo': 'Sobreesfuerzo Crítico',
-            'desc': f"Corriente de {corriente:.1f}A supera umbral crítico (>200A)",
-            'sub': 'FÍSICO · CRÍTICO'
-        })
+        eventos.append({'tiempo': tiempo, 'tipo': 'CRITICAS', 'icono': '🔴', 'color': '#EF4444', 'titulo': 'Sobreesfuerzo Crítico', 'desc': f"Corriente a {corriente:.1f}A", 'sub': 'FÍSICO · CRÍTICO'})
     elif corriente >= 180:
-        eventos.append({
-            'tiempo': tiempo,
-            'tipo': 'PRECAUCION',
-            'icono': '🟡',
-            'color': '#FBBF24', # Amarillo
-            'titulo': 'Alta Carga Detectada',
-            'desc': f"Corriente de {corriente:.1f}A en zona de precaución (>180A)",
-            'sub': 'FÍSICO · PRECAUCIÓN'
-        })
+        eventos.append({'tiempo': tiempo, 'tipo': 'PRECAUCION', 'icono': '🟡', 'color': '#FBBF24', 'titulo': 'Alta Carga Detectada', 'desc': f"Corriente a {corriente:.1f}A", 'sub': 'FÍSICO · PRECAUCIÓN'})
     else:
-        eventos.append({
-            'tiempo': tiempo,
-            'tipo': 'NORMAL',
-            'icono': '🟢',
-            'color': '#10B981', # Verde
-            'titulo': 'Operación Nominal',
-            'desc': f"Corriente estable y segura a {corriente:.1f}A",
-            'sub': 'FÍSICO · ESTABLE'
-        })
+        eventos.append({'tiempo': tiempo, 'tipo': 'NORMAL', 'icono': '🟢', 'color': '#10B981', 'titulo': 'Operación Nominal', 'desc': f"Corriente estable a {corriente:.1f}A", 'sub': 'FÍSICO · ESTABLE'})
 
-# Ordenamos la lista para que el evento más reciente salga arriba
-eventos = sorted(eventos, key=lambda x: x['tiempo'], reverse=True)
-
-# 10.3 Aplicar el Filtro Seleccionado
-if filtro_log == "Normal":
-    eventos_mostrar = [e for e in eventos if e['tipo'] == 'NORMAL']
-elif filtro_log == "Precaución":
-    eventos_mostrar = [e for e in eventos if e['tipo'] == 'PRECAUCION']
-elif filtro_log == "Críticas":
-    eventos_mostrar = [e for e in eventos if e['tipo'] == 'CRITICAS']
-elif filtro_log == "IA":
-    eventos_mostrar = [e for e in eventos if e['tipo'] == 'IA']
-else:
-    eventos_mostrar = eventos # Opción "Todas"
-
-# 👉 EL FRENO DE SEGURIDAD: Mostramos solo los 100 eventos más recientes
-LIMITE_EVENTOS = 50
-eventos_mostrar = eventos_mostrar[:LIMITE_EVENTOS]
-
-# 10.4 Renderizado del Log con Scroll Automático
 with st.container(height=400):
-    if len(eventos_mostrar) == 0:
+    if len(eventos) == 0:
         st.success(f"✅ Sistema estable. No hay alertas para la categoría '{filtro_log}'.")
     else:
-        # Avisamos al operador si hay más eventos ocultos
-        if len(eventos) > LIMITE_EVENTOS and filtro_log == "Todas":
-             st.caption(f"Mostrando los últimos {LIMITE_EVENTOS} eventos")
+        if len(df_operando_log) > LIMITE_EVENTOS and filtro_log == "Todas":
+             st.caption(f"Mostrando los {LIMITE_EVENTOS} eventos más recientes por rendimiento.")
              
-        for ev in eventos_mostrar:
+        for ev in eventos:
             hora_str = ev['tiempo'].strftime("%H:%M") 
             fecha_str = ev['tiempo'].strftime("%Y-%m-%d")
             
-           # Tarjeta HTML adaptada AUTOMÁTICAMENTE al tema (Claro/Oscuro/Sistema)
             tarjeta_html = f"""<div style="background-color: var(--secondary-background-color); border-left: 4px solid {ev['color']}; padding: 12px; margin-bottom: 8px; border-radius: 4px; display: flex; justify-content: space-between; font-family: monospace; border-top: 1px solid rgba(128,128,128,0.2); border-right: 1px solid rgba(128,128,128,0.2); border-bottom: 1px solid rgba(128,128,128,0.2);"><div style="display: flex; flex-direction: column;"><div style="display: flex; align-items: center; margin-bottom: 4px;"><span style="font-size: 16px;">{ev['icono']}</span><span style="color: var(--text-color); font-weight: bold; margin-left: 8px; font-size: 14px;">{ev['titulo']}</span></div><div style="color: var(--text-color); opacity: 0.8; font-size: 13px; margin-left: 28px; margin-bottom: 6px;">{ev['desc']}</div><div style="color: {ev['color']}; font-size: 11px; font-weight: bold; margin-left: 28px;">{ev['sub']}</div></div><div style="color: var(--text-color); opacity: 0.6; font-size: 12px; text-align: right;">{fecha_str}<br>{hora_str}</div></div>"""
-            
             st.markdown(tarjeta_html, unsafe_allow_html=True)
