@@ -4,9 +4,9 @@ import joblib
 import numpy as np
 import plotly.graph_objects as go
 
-# ==========================================
+# =========================================
 # 1. CONFIGURACIÓN DE LA PÁGINA Y CABECERA
-# ==========================================
+# =========================================
 st.set_page_config(page_title="Mantenimiento Predictivo - IMPALA", layout="wide")
 
 import streamlit.components.v1 as components
@@ -95,9 +95,9 @@ except Exception as e:
     st.sidebar.error("❌ Error al cargar los archivos .joblib. Verifica que estén en la misma carpeta.")
     st.stop()
 
-# ==========================================
+# =========================================
 # 3. CARGA DE DATOS (SUBIDA MANUAL)
-# ==========================================
+# =========================================
 st.sidebar.header("1. Carga de Datos")
 archivo_subido = st.sidebar.file_uploader("📂 Sube el historial CSV del SCADA", type=["csv"])
 
